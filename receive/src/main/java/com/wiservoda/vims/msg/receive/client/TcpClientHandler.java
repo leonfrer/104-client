@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 public class TcpClientHandler extends ChannelInboundHandlerAdapter {
 
     private final Map<Integer, MessageFile> fileMap = new ConcurrentHashMap<>();
-    private MessageSerialNumber sendMessageSerialNumber = new MessageSerialNumber(0);
+    private final MessageSerialNumber sendMessageSerialNumber = new MessageSerialNumber(0);
     private MessageSerialNumber recentMessageSerialNumber = null;
     private MessageSerialNumber lastRepliedSerialNumber = null;
     private ScheduledFuture<?> sendSSchedule;

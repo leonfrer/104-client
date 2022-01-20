@@ -38,6 +38,10 @@ public class MessageSerialNumber {
     }
 
     public MessageSerialNumber getPlus(int n) {
-        return new MessageSerialNumber(decNum.addAndGet(n));
+        int i = decNum.get() + n;
+        if (i > 32767) {
+            i = (i % 32768);
+        }
+        return new MessageSerialNumber(i);
     }
 }
