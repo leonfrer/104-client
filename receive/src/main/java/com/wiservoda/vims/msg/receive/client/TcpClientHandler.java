@@ -19,35 +19,34 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class TcpClientHandler extends ChannelInboundHandlerAdapter {
 
+    private final TcpClient client;
     private final Map<Integer, MessageFile> fileMap = new ConcurrentHashMap<>();
     private final MessageSerialNumber sendMessageSerialNumber = new MessageSerialNumber(0);
-    private MessageSerialNumber recentMessageSerialNumber = null;
-    private MessageSerialNumber lastRepliedSerialNumber = null;
-    private ScheduledFuture<?> sendSSchedule;
-    private boolean casual = false;
+    private MessageSerialNumber recentMessageSerialNumber = new MessageSerialNumber(-1);
+    private MessageSerialNumber lastRepliedSerialNumber = new MessageSerialNumber(-1);
+    private ScheduledFuture<?> schedule;
+
+    public TcpClientHandler(TcpClient client) {
+        this.client = client;
+    }
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        log.info("{}....{}, {}", fileMap.keySet(), recentMessageSerialNumber.getSerialNumDec(), lastRepliedSerialNumber.getSerialNumDec());
         log.info("Sending initialize...");
         sendMessage(ctx, new byte[]{0x68, 0x04, 0x07, 0x00, 0x00, 0x00});
-        ctx.channel().eventLoop().schedule(() -> {
-            casual = fileMap.isEmpty() && recentMessageSerialNumber.equals(lastRepliedSerialNumber);
-            if (casual) {
-                sendSSchedule.cancel(true);
-                sendSSchedule = null;
-            } else if (sendSSchedule == null) {
-                sendSSchedule = ctx.channel().eventLoop().schedule(() -> {
-                    if (lastRepliedSerialNumber.getSerialNumDec() > recentMessageSerialNumber.getSerialNumDec()) {
-                        try {
-                            sendSerialNumConfirm(ctx);
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                            log.error("Error during send S message.");
-                        }
-                    }
-                }, 10, TimeUnit.SECONDS);
+        schedule = ctx.channel().eventLoop().scheduleAtFixedRate(() -> {
+            log.info("schedule");
+            log.info("{}....{}, {}", fileMap.keySet(), recentMessageSerialNumber.getSerialNumDec(), lastRepliedSerialNumber.getSerialNumDec());
+            if (!fileMap.isEmpty() || !lastRepliedSerialNumber.equals(recentMessageSerialNumber)) {
+                try {
+                    sendSerialNumConfirm(ctx);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    log.error("Error during send S message.");
+                }
             }
-        }, 10, TimeUnit.SECONDS);
+        }, 6, 8, TimeUnit.SECONDS);
     }
 
     @Override
@@ -65,7 +64,6 @@ public class TcpClientHandler extends ChannelInboundHandlerAdapter {
             return;
         }
         if (bytes[1] != 0x04) {
-            casual = false;
             recentMessageSerialNumber = new MessageSerialNumber(Arrays.copyOfRange(bytes, 2, 4));
             // file receive init
             if (Byte.toUnsignedInt(bytes[6]) == 0xD2 && Byte.toUnsignedInt(bytes[8]) == 0x05 && Byte.toUnsignedInt(bytes[16]) == 0x07) {
@@ -116,8 +114,17 @@ public class TcpClientHandler extends ChannelInboundHandlerAdapter {
     }
 
     @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        cause.printStackTrace();
+        ctx.close();
+    }
+
+    @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        log.warn("Channel inactive");
+        log.warn("channel inactive");
+        schedule.cancel(true);
+        ctx.channel().close();
+        client.start();
     }
 
     private void sendIMessage(ChannelHandlerContext ctx, byte[] bytes) throws Exception {
@@ -129,7 +136,9 @@ public class TcpClientHandler extends ChannelInboundHandlerAdapter {
     }
 
     private void sendSerialNumConfirm(ChannelHandlerContext ctx) throws InterruptedException {
-        sendMessage(ctx, ArrayUtils.addAll(new byte[]{0x68, 0x04, 0x01, 0x00}, recentMessageSerialNumber.getPlus(1).getSerialNumBytes()));
+        MessageSerialNumber serial = recentMessageSerialNumber.getPlus(1);
+        log.info("send s serial: {}", serial.getSerialNumDec());
+        sendMessage(ctx, ArrayUtils.addAll(new byte[]{0x68, 0x04, 0x01, 0x00}, serial.getSerialNumBytes()));
         lastRepliedSerialNumber = recentMessageSerialNumber;
     }
 
